@@ -1,10 +1,11 @@
-(function(){
+javascript:(function(){
     if(document.getElementById('pbs-main-panel')) return;
 
     var serverOffset = 0;
     var lastPlannedFireTime = null;
     var countdownTimer = null;
     var suspendedRetryEnabled = true;
+    var autoCheckoutEnabled = false;
 
     // --- 1. LOG 面板 ---
     var logPanel = document.createElement('div');
@@ -21,6 +22,7 @@
         if(type === 'WARNING') color = '#ffcc00';
         if(type === 'ERROR')   color = '#ff4444';
         if(type === 'GUARD')   color = '#00bfff';
+        if(type === 'CHECKOUT')color = '#ff00ff';
 
         var nowForLog = new Date(Date.now() + serverOffset);
         var time = nowForLog.toLocaleTimeString('en-GB') + '.' + String(nowForLog.getMilliseconds()).padStart(3,'0');
@@ -33,306 +35,153 @@
     }
 
     // --- 2. Guardian ---
-    log('GUARD', 'Session Guardian V3.0 已啟動 (每4分鐘保活)');
+    log('GUARD', 'Session Guardian V3.0 已啟動');
     var guardTimer = setInterval(function() {
-        fetch(window.location.href, { method: 'HEAD' })
-            .then(function(r) {
-                if(r.ok) log('GUARD', '保活成功 (Session Active)');
-                else     log('WARNING', '保活異常 Status: ' + r.status);
-            })
-            .catch(function(e) { log('ERROR', '保活網絡錯誤: ' + e); });
+        fetch(window.location.href, { method: 'HEAD' }).catch(()=>{});
     }, 240000);
 
     // --- 3. 控制面板 ---
     var panel = document.createElement('div');
     panel.id = 'pbs-main-panel';
     panel.style.cssText = 'position:fixed;bottom:20px;right:20px;width:320px;background:rgba(20,20,20,0.95);color:#fff;z-index:999999;padding:15px;border-radius:8px;font-size:13px;border:1px solid #444;box-shadow:0 4px 15px rgba(0,0,0,0.5);font-family:sans-serif;';
-
-    // Update Default Time to 15:00:00
     panel.innerHTML = '\
         <h3 style="color:#fc0;margin:0 0 10px;border-bottom:1px solid #555;padding-bottom:5px;font-size:16px;font-weight:bold;display:flex;justify-content:space-between;">\
-            <span>P-Bandai Sniper V7.3.3</span>\
-            <span id="pbs-close-btn" style="cursor:pointer;color:#999;font-weight:bold;padding:0 5px;">✕</span>\
+            <span>P-Bandai Sniper V7.4.3</span>\
+            <span id="pbs-close-btn" style="cursor:pointer;color:#999;padding:0 5px;">✕</span>\
         </h3>\
         <div style="margin-bottom:8px">\
             <label style="display:block;color:#ccc;font-size:11px">⏰ Time (HH:MM:SS)</label>\
             <input id="pbs-time" value="15:00:00" style="width:100%;padding:5px;background:#333;color:#fff;border:1px solid #555;border-radius:4px;box-sizing:border-box;">\
+            <button id="pbs-sync" style="margin-top:4px;padding:4px 6px;font-size:11px;background:#007bff;color:#fff;border:none;border-radius:4px;cursor:pointer;">Sync</button>\
         </div>\
         <div id="pbs-countdown" style="margin-bottom:4px;text-align:center;font-size:16px;color:#0fd;">--.-- s</div>\
         <div style="display:flex;gap:10px;margin-bottom:8px">\
-            <div style="flex:1">\
-                <label style="display:block;color:#ccc;font-size:11px">🔢 Qty</label>\
-                <input id="pbs-qty" type="number" value="1" style="width:100%;padding:5px;background:#333;color:#fff;border:1px solid #555;border-radius:4px;box-sizing:border-box;">\
-            </div>\
-            <div style="flex:1">\
-                <label style="display:block;color:#ccc;font-size:11px">🕰️ Offset (ms)</label>\
-                <input id="pbs-offset" type="number" value="0" placeholder="+/-" style="width:100%;padding:5px;background:#333;color:#fff;border:1px solid #555;border-radius:4px;box-sizing:border-box;">\
-            </div>\
+            <div style="flex:1"><label style="display:block;color:#ccc;font-size:11px">🔢 Qty</label><input id="pbs-qty" type="number" value="1" style="width:100%;padding:5px;background:#333;color:#fff;border:1px solid #555;border-radius:4px;box-sizing:border-box;"></div>\
+            <div style="flex:1"><label style="display:block;color:#ccc;font-size:11px">🕰️ Offset (ms)</label><input id="pbs-offset" type="number" value="0" style="width:100%;padding:5px;background:#333;color:#fff;border:1px solid #555;border-radius:4px;box-sizing:border-box;"></div>\
         </div>\
-        <div style="margin-bottom:6px;display:flex;align-items:center;gap:6px;font-size:11px;color:#ccc;">\
-            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">\
-                <input id="pbs-sus-toggle" type="checkbox" checked style="margin:0;">\
-                <span>Suspended Retry</span>\
-            </label>\
+        <div style="margin-bottom:6px;display:flex;justify-content:space-between;font-size:11px;">\
+            <label><input id="pbs-sus-toggle" type="checkbox" checked> Suspended Retry</label>\
+            <label style="color:#f0f;"><input id="pbs-checkout-toggle" type="checkbox"> Target Redirect ⚡</label>\
         </div>\
         <div style="margin-bottom:10px">\
             <label style="display:block;color:#ccc;font-size:11px">📋 Paste Fetch</label>\
-            <textarea id="pbs-fetch" rows="3" style="width:100%;padding:5px;background:#333;color:#aaa;border:1px solid #555;border-radius:4px;font-size:11px;resize:vertical;box-sizing:border-box;" placeholder="fetch(...)"></textarea>\
+            <textarea id="pbs-fetch" rows="3" style="width:100%;padding:5px;background:#333;color:#aaa;border:1px solid #555;border-radius:4px;font-size:11px;resize:vertical;box-sizing:border-box;"></textarea>\
         </div>\
-        <button id="pbs-btn" style="width:100%;padding:10px;background:#28a745;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:bold;font-size:14px;text-align:center;">🚀 Start</button>\
-        <div id="pbs-status" style="margin-top:5px;text-align:center;color:#aaa;font-size:11px">Ready. <span style="color:#00bfff">🛡️Guardian ON</span></div>\
-        <div style="margin-top:3px;text-align:right;font-size:10px;color:#666;">v7.3.3 · by Industrial Revolution + Doro Army</div>\
+        <button id="pbs-btn" style="width:100%;padding:10px;background:#28a745;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:bold;">🚀 Start</button>\
+        <div id="pbs-status" style="margin-top:5px;text-align:center;color:#aaa;font-size:11px">Ready.</div>\
     ';
     document.body.appendChild(panel);
 
-    var closeBtn = document.getElementById('pbs-close-btn');
-    if(closeBtn) {
-        closeBtn.onclick = function() {
-            if(panel) panel.remove();
-            if(logPanel) logPanel.style.display = 'none';
-            if(guardTimer) clearInterval(guardTimer);
-            if(countdownTimer) clearInterval(countdownTimer);
-        };
-    }
+    document.getElementById('pbs-close-btn').onclick = function() {
+        panel.remove(); logPanel.style.display = 'none';
+        clearInterval(guardTimer); if(countdownTimer) clearInterval(countdownTimer);
+    };
 
-    var timeInput   = document.getElementById('pbs-time');
-    var qtyInput    = document.getElementById('pbs-qty');
-    var offsetInput = document.getElementById('pbs-offset');
-    var fetchInput  = document.getElementById('pbs-fetch');
-    var btn         = document.getElementById('pbs-btn');
-    var status      = document.getElementById('pbs-status');
-    var cdLabel     = document.getElementById('pbs-countdown');
-    var susToggle   = document.getElementById('pbs-sus-toggle');
-
-    if (susToggle) {
-        susToggle.onchange = function () {
-            suspendedRetryEnabled = !!susToggle.checked;
-            log('INFO', 'Suspended Retry 已' + (suspendedRetryEnabled ? '啟用' : '關閉'));
-        };
-    }
-
-    (function(){
-        if (!timeInput) return;
-        var syncBtn = document.createElement('button');
-        syncBtn.id = 'pbs-sync';
-        syncBtn.textContent = 'Sync';
-        syncBtn.style.marginTop = '4px';
-        syncBtn.style.padding = '4px 6px';
-        syncBtn.style.fontSize = '11px';
-        syncBtn.style.background = '#007bff';
-        syncBtn.style.color = '#fff';
-        syncBtn.style.border = 'none';
-        syncBtn.style.borderRadius = '4px';
-        syncBtn.style.cursor = 'pointer';
-        timeInput.parentNode.appendChild(syncBtn);
-
-        syncBtn.onclick = function () {
-            log('INFO', '開始對錶...');
-            var t0 = Date.now();
-            fetch(window.location.href, { method: 'HEAD', cache: 'no-store' })
-                .then(function (r) {
-                    var t1 = Date.now();
-                    var dateHeader = r.headers.get('date');
-                    if (!dateHeader) {
-                        log('WARNING', '伺服器無 Date Header，用返本地時間');
-                        serverOffset = 0;
-                        return;
-                    }
-                    var serverTime = new Date(dateHeader).getTime();
-                    var latency = (t1 - t0) / 2;
-                    var adjustedServer = serverTime + latency;
-                    serverOffset = adjustedServer - t1;
-                    log('SUCCESS', '對錶完成，Server Offset: ' + serverOffset + 'ms');
-                })
-                .catch(function (e) {
-                    log('ERROR', '對錶失敗: ' + e);
-                    serverOffset = 0;
-                });
-        };
-    })();
+    var timeInput = document.getElementById('pbs-time'), qtyInput = document.getElementById('pbs-qty'), offsetInput = document.getElementById('pbs-offset'), fetchInput = document.getElementById('pbs-fetch'), btn = document.getElementById('pbs-btn'), status = document.getElementById('pbs-status'), cdLabel = document.getElementById('pbs-countdown');
+    document.getElementById('pbs-sus-toggle').onchange = function() { suspendedRetryEnabled = this.checked; };
+    
+    // UI 文字更新
+    document.getElementById('pbs-checkout-toggle').onchange = function() { 
+        autoCheckoutEnabled = this.checked; 
+        if(this.checked) log('CHECKOUT', '⚡ 自動追蹤跳轉已開啟 (將帶同目標 ID 前往購物車)！'); 
+    };
+    
+    document.getElementById('pbs-sync').onclick = function() {
+        var t0 = Date.now();
+        fetch(window.location.href, { method: 'HEAD', cache: 'no-store' }).then(r => {
+            var d = r.headers.get('date');
+            if(d) {
+                var t1 = Date.now();
+                serverOffset = (new Date(d).getTime() + ((t1 - t0) / 2)) - t1;
+                log('SUCCESS', '對錶完成，Offset: ' + serverOffset + 'ms');
+            }
+        });
+    };
 
     var pid = null;
     try {
         var scripts = [].slice.call(document.querySelectorAll('script'));
         for (var i = 0; i < scripts.length; i++) {
             if (scripts[i].textContent.includes('PRELOAD_DATA =')) {
-                var jsonMatch = scripts[i].textContent.match(/PRELOAD_DATA\s*=\s*({.*?})\s*$/m);
-                if (jsonMatch) {
-                    var data = JSON.parse(jsonMatch[1]);
-                    if(data.product && data.product.areaItemNos) {
-                        pid = data.product.areaItemNos[0];
-                        log('SUCCESS', '自動鎖定商品 ID: ' + pid);
-                        status.innerHTML = 'Locked: ' + pid + ' <span style="color:#00bfff">🛡️Guardian ON</span>';
-                        status.style.color = '#0f0';
-                    }
+                var m = scripts[i].textContent.match(/PRELOAD_DATA\s*=\s*({.*?})\s*$/m);
+                if (m) {
+                    var d = JSON.parse(m[1]);
+                    if(d.product && d.product.areaItemNos) { pid = d.product.areaItemNos[0]; status.innerHTML = 'Locked: ' + pid; status.style.color = '#0f0'; }
                 }
                 break;
             }
         }
-    } catch(e) {
-        log('ERROR', '解析 ID 失敗: ' + e.message);
-    }
-
-    if(!pid) log('WARNING', '未找到商品 ID，請確認在商品詳情頁');
-
-    function startCountdown(targetTimeMs) {
-        if (countdownTimer) clearInterval(countdownTimer);
-        countdownTimer = setInterval(function(){
-            var now = Date.now() + serverOffset;
-            var diff = targetTimeMs - now;
-            if (diff <= 0) {
-                cdLabel.textContent = '0.00 s';
-                clearInterval(countdownTimer);
-                countdownTimer = null;
-                return;
-            }
-            var s = (diff/1000).toFixed(2);
-            cdLabel.textContent = s + ' s';
-        }, 100);
-    }
-
-    function fireWithRetry(url, config, max5xxRetries, attempt5xx, suspendedRetriesLeft) {
-        attempt5xx = attempt5xx || 1;
-        if (suspendedRetriesLeft == null) suspendedRetriesLeft = 3;
-
-        log('INFO', '發送購買請求... (Attempt ' + attempt5xx + '/' + max5xxRetries + ', SusLeft ' + suspendedRetriesLeft + ')');
-
-        var sendTime = Date.now() + serverOffset;
-
-        return fetch(url, config).then(function(r){
-            var receiveTime = Date.now() + serverOffset;
-            var latency = receiveTime - sendTime;
-            
-            log('INFO', 'Response: ' + r.status + ' (latency: ' + latency + 'ms)');
-
-            return r.text().then(function(txt){
-                var parsed = null;
-                try { parsed = JSON.parse(txt); } catch(_) {}
-
-                if(r.status >= 500 && !r.ok && attempt5xx < max5xxRetries){
-                    log('WARNING', '伺服器 5xx ('+r.status+')，準備重試...');
-                    return new Promise(function(res){
-                        setTimeout(res, 300);
-                    }).then(function(){
-                        return fireWithRetry(url, config, max5xxRetries, attempt5xx+1, suspendedRetriesLeft);
-                    });
-                }
-
-                if(
-                    suspendedRetryEnabled &&
-                    r.status === 400 &&
-                    parsed && parsed.error &&
-                    parsed.error.indexOf('CouldNotAddToCartBySuspendedItem') !== -1 &&
-                    suspendedRetriesLeft > 0
-                ){
-                    log('WARNING', '商品狀態 Suspended，嘗試再補射 (剩 ' + (suspendedRetriesLeft-1) + ' 次)...');
-                    return new Promise(function(res){
-                        setTimeout(res, 350);
-                    }).then(function(){
-                        return fireWithRetry(url, config, max5xxRetries, attempt5xx, suspendedRetriesLeft-1);
-                    });
-                }
-
-                log(r.ok ? 'SUCCESS' : 'ERROR', 'HTTP Status: ' + r.status);
-                return txt;
-            });
-        });
-    }
+    } catch(e) {}
 
     btn.onclick = function() {
-        var timeStr   = timeInput.value;
-        var qty       = parseInt(qtyInput.value)    || 1;
-        var offset    = parseInt(offsetInput.value) || 0;
-        var fetchCode = fetchInput.value;
-
-        if (!pid)       { log('ERROR', '無法啟動: 缺少商品 ID'); return; }
-        if (!fetchCode) { log('ERROR', '無法啟動: 請貼上 Fetch 代碼'); return; }
+        var timeStr = timeInput.value, qty = parseInt(qtyInput.value)||1, offset = parseInt(offsetInput.value)||0, fetchCode = fetchInput.value;
+        if (!pid) { log('ERROR', '缺少商品 ID'); return; }
+        if (!fetchCode) { log('ERROR', '請貼上 Fetch'); return; }
 
         var match = fetchCode.match(/fetch\((["'])(.*?)\1,\s*({[\s\S]*})\)/);
-        if (!match) {
-            try {
-                let startUrl = fetchCode.indexOf('fetch(');
-                if(startUrl === -1) throw new Error('no fetch');
-                let firstQuote = fetchCode.indexOf("'", startUrl);
-                let doubleQuote = fetchCode.indexOf('"', startUrl);
-                let quote = (firstQuote !== -1 && (doubleQuote === -1 || firstQuote < doubleQuote)) ? "'" : '"';
-                
-                let startUrlContent = fetchCode.indexOf(quote, startUrl) + 1;
-                let endUrlContent = fetchCode.indexOf(quote, startUrlContent);
-                let url = fetchCode.substring(startUrlContent, endUrlContent);
-                
-                let startObj = fetchCode.indexOf('{', endUrlContent);
-                let endObj = fetchCode.lastIndexOf('}');
-                let configStr = fetchCode.substring(startObj, endObj + 1);
-                
-                match = [null, quote, url, configStr];
-                log('INFO', 'Regex失敗，切換至手動解析模式成功');
-            } catch(e) {
-                log('ERROR', 'Fetch 格式錯誤 (Regex & Manual failed)'); 
-                return;
-            }
+        if(!match){
+             try {
+                let sUrl = fetchCode.indexOf('fetch('), q = "'";
+                if(fetchCode.indexOf('"', sUrl) !== -1 && (fetchCode.indexOf("'", sUrl) === -1 || fetchCode.indexOf('"', sUrl) < fetchCode.indexOf("'", sUrl))) q = '"';
+                let sUrlC = fetchCode.indexOf(q, sUrl) + 1, eUrlC = fetchCode.indexOf(q, sUrlC), u = fetchCode.substring(sUrlC, eUrlC);
+                let sObj = fetchCode.indexOf('{', eUrlC), eObj = fetchCode.lastIndexOf('}'), cStr = fetchCode.substring(sObj, eObj + 1);
+                match = [null, q, u, cStr];
+            } catch(e) { log('ERROR', 'Fetch 格式錯誤'); return; }
         }
 
-        var url = match[2];
-        var configStr = match[3];
-        var config;
-        try { config = new Function('return ' + configStr)(); }
-        catch(e) { log('ERROR', 'Fetch Config 解析失敗'); return; }
-
+        var url = match[2], configStr = match[3], config;
+        try { config = new Function('return ' + configStr)(); } catch(e) { log('ERROR', 'Fetch 解析失敗'); return; }
         config.body = JSON.stringify([{ areaItemNo: pid, qty: qty }]);
         config.credentials = 'include';
 
-        var now = new Date(Date.now() + serverOffset);
-        var target = new Date(now);
-        var t = timeStr.split(':');
+        var target = new Date(Date.now() + serverOffset), t = timeStr.split(':');
         target.setHours(t[0], t[1], t[2], 0);
-        var delay = target.getTime() - now.getTime() + offset;
-
+        var delay = target.getTime() - (Date.now() + serverOffset) + offset;
         lastPlannedFireTime = target.getTime() + offset;
+        btn.disabled = true; btn.style.opacity = '0.5'; btn.innerText = '⏳ 倒數中...';
 
-        btn.disabled = true;
-        btn.style.opacity = '0.5';
-        btn.innerText = '⏳ 倒數中...';
-
-        if(delay < 0) {
-            log('WARNING', '時間已過，立即發射! (Delay: ' + delay + 'ms)');
-            delay = 0;
-        } else {
-            log('INFO', '將於 ' + (delay/1000).toFixed(3) + ' 秒後發射');
-        }
-
-        startCountdown(lastPlannedFireTime);
+        if(countdownTimer) clearInterval(countdownTimer);
+        countdownTimer = setInterval(function(){
+            var diff = lastPlannedFireTime - (Date.now() + serverOffset);
+            if(diff <= 0){ cdLabel.textContent = '0.00 s'; clearInterval(countdownTimer); return; }
+            cdLabel.textContent = (diff/1000).toFixed(2) + ' s';
+        }, 100);
 
         setTimeout(function() {
-            fireWithRetry(url, config, 5)
-                .then(function(txt){
-                    var parsed = null;
-                    try { parsed = JSON.parse(txt); } catch(_) {}
-
-                    if(parsed && parsed.totalCartCount){
-                        log('SUCCESS', '🎉 成功加入購物車 (數量: ' + qty + ') | 購物車總數: ' + parsed.totalCartCount);
-                    } else if(parsed && parsed.additional && parsed.additional.productOutOfStock){
-                        log('WARNING', '商品已售罄 (productOutOfStock)');
-                    } else if(parsed && parsed.error && parsed.error.indexOf('OutOfStock') !== -1){
-                        log('WARNING', '商品已售罄 (OutOfStock)');
-                    } else if(parsed && parsed.error && parsed.error.indexOf('SuspendedItem') !== -1){
-                        log('WARNING', '商品狀態仍為 Suspended');
-                    } else if(txt){
-                        log('WARNING', '回應異常: ' + txt.slice(0, 100));
-                    } else {
-                        log('WARNING', '回應為空');
+            var attempt = function(retries, susRetries){
+                fetch(url, config).then(r => r.text().then(txt => {
+                    var p = null; try{ p = JSON.parse(txt); }catch(_){}
+                    if(r.status >= 500 && retries > 0) {
+                        log('WARNING', '5xx 重試...');
+                        setTimeout(()=>attempt(retries-1, susRetries), 300);
+                        return;
                     }
-
-                    btn.disabled = false;
-                    btn.style.opacity = '1';
-                    btn.innerText = '🚀 Start';
-                })
-                .catch(function(e){
-                    log('ERROR', '最終失敗: ' + e);
-                    btn.disabled = false;
-                    btn.style.opacity = '1';
-                    btn.innerText = '🚀 Start';
-                });
-        }, delay);
+                    if(suspendedRetryEnabled && r.status === 400 && p && p.error && p.error.includes('CouldNotAddToCartBySuspendedItem') && susRetries > 0){
+                        log('WARNING', 'Suspended 重試...');
+                        setTimeout(()=>attempt(retries, susRetries-1), 350);
+                        return;
+                    }
+                    if(p && p.totalCartCount){
+                        log('SUCCESS', '🎉 加入購物車成功！');
+                        
+                        // 核心改動：跳轉機制
+                        if(autoCheckoutEnabled) {
+                            log('CHECKOUT', '⚡ 準備跳轉並帶上追蹤目標: ' + pid);
+                            // 延遲 300ms 確保 Session 已寫入，然後跳轉並附加 target 參數
+                            setTimeout(function(){ 
+                                window.location.href = 'https://p-bandai.com/hk/cart?target=' + pid; 
+                            }, 300);
+                        } else {
+                            btn.disabled = false; btn.style.opacity = '1'; btn.innerText = '🚀 Start';
+                        }
+                        
+                    } else {
+                        log('ERROR', '回應異常: ' + txt.slice(0,50));
+                        btn.disabled = false; btn.style.opacity = '1'; btn.innerText = '🚀 Start';
+                    }
+                })).catch(e => { log('ERROR', '發射失敗: '+e); btn.disabled = false; btn.style.opacity = '1'; btn.innerText = '🚀 Start'; });
+            };
+            attempt(4, 3);
+        }, delay < 0 ? 0 : delay);
     };
 })();
